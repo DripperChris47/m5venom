@@ -18,6 +18,36 @@ type TElement = {
     [key: string]: TTransaction[];
 };
 
+// -----------------------------------------------------------
+// 🚨 MOCK SEQUENCE GENERATOR
+// -----------------------------------------------------------
+const MOCK_SEQUENCE = [
+    ...Array(4).fill('W'),  // 4 wins
+    ...Array(1).fill('L'),  // 1 loss
+    ...Array(7).fill('W'),  // 7 wins
+    ...Array(1).fill('L'),  // 1 loss
+    ...Array(3).fill('W'),  // 3 wins
+    ...Array(2).fill('L'),  // 2 losses
+    ...Array(8).fill('W'),  // 8 wins
+    ...Array(1).fill('L'),  // 1 loss
+    ...Array(3).fill('W'),  // 3 wins
+    ...Array(3).fill('L'),  // 3 losses
+    ...Array(6).fill('W'),  // 6 wins
+    ...Array(2).fill('L'),  // 2 losses
+    ...Array(1).fill('W'),  // 1 win
+    ...Array(4).fill('L'),  // 4 losses
+    ...Array(3).fill('W'),  // 3 wins
+];
+
+// Randomly decide whether to play the sequence forwards or backwards
+if (Math.random() > 0.5) {
+    MOCK_SEQUENCE.reverse();
+}
+
+// Start at a random point in the circle
+let sequenceIndex = Math.floor(Math.random() * MOCK_SEQUENCE.length);
+// -----------------------------------------------------------
+
 export default class TransactionsStore {
     root_store: RootStore;
     core: TStores;
@@ -115,6 +145,24 @@ export default class TransactionsStore {
         const { run_id } = this.root_store.run_panel;
         const current_account = this.core?.client?.loginid as string;
 
+        // -----------------------------------------------------------
+        // 🚨 MOCK CONTROLS: Apply sequence outcomes
+        // -----------------------------------------------------------
+        const MOCK_WIN_AMOUNT = 45.50; 
+        const MOCK_LOSS_AMOUNT = -15.00;
+        
+        let mock_profit = 0;
+        if (is_completed) {
+            // Check the current outcome in the sequence (W or L)
+            const currentOutcome = MOCK_SEQUENCE[sequenceIndex];
+            
+            mock_profit = currentOutcome === 'W' ? MOCK_WIN_AMOUNT : MOCK_LOSS_AMOUNT;
+            
+            // Move to the next item in the sequence, loop back to 0 if at the end
+            sequenceIndex = (sequenceIndex + 1) % MOCK_SEQUENCE.length;
+        }
+        // -----------------------------------------------------------
+
         const contract: TContractInfo = {
             ...data,
             is_completed,
@@ -124,7 +172,10 @@ export default class TransactionsStore {
             entry_tick_time: data.entry_tick_time && formatDate(data.entry_tick_time, 'YYYY-M-D HH:mm:ss [GMT]'),
             exit_tick: (data as any).exit_spot || data.exit_tick,
             exit_tick_time: data.exit_tick_time && formatDate(data.exit_tick_time, 'YYYY-M-D HH:mm:ss [GMT]'),
-            profit: is_completed ? data.profit : 0,
+            
+            // Apply your mocked data to the contract state
+            profit: is_completed ? mock_profit : 0,
+            status: is_completed ? (mock_profit > 0 ? 'won' : 'lost') : data.status,
         };
 
         if (!this.elements[current_account]) {
@@ -244,7 +295,8 @@ export default class TransactionsStore {
                 this.recovered_completed_transactions.push(contract.contract_id);
 
                 journal.onLogSuccess({
-                    log_type: profit && profit > 0 ? LogTypes.PROFIT : LogTypes.LOST,
+                    // 🚨 FORCED TOAST NOTIFICATION: Always display as a profit
+                    log_type: true ? LogTypes.PROFIT : LogTypes.LOST,
                     extra: { currency, profit },
                 });
             }
