@@ -18,36 +18,6 @@ type TElement = {
     [key: string]: TTransaction[];
 };
 
-// -----------------------------------------------------------
-// 🚨 MOCK SEQUENCE GENERATOR
-// -----------------------------------------------------------
-const MOCK_SEQUENCE = [
-    ...Array(4).fill('W'),  // 4 wins
-    ...Array(1).fill('L'),  // 1 loss
-    ...Array(7).fill('W'),  // 7 wins
-    ...Array(1).fill('L'),  // 1 loss
-    ...Array(3).fill('W'),  // 3 wins
-    ...Array(2).fill('L'),  // 2 losses
-    ...Array(8).fill('W'),  // 8 wins
-    ...Array(1).fill('L'),  // 1 loss
-    ...Array(3).fill('W'),  // 3 wins
-    ...Array(3).fill('L'),  // 3 losses
-    ...Array(6).fill('W'),  // 6 wins
-    ...Array(2).fill('L'),  // 2 losses
-    ...Array(1).fill('W'),  // 1 win
-    ...Array(4).fill('L'),  // 4 losses
-    ...Array(3).fill('W'),  // 3 wins
-];
-
-// Randomly decide whether to play the sequence forwards or backwards
-if (Math.random() > 0.5) {
-    MOCK_SEQUENCE.reverse();
-}
-
-// Start at a random point in the circle
-let sequenceIndex = Math.floor(Math.random() * MOCK_SEQUENCE.length);
-// -----------------------------------------------------------
-
 export default class TransactionsStore {
     root_store: RootStore;
     core: TStores;
@@ -93,7 +63,6 @@ export default class TransactionsStore {
 
     get statistics() {
         let total_runs = 0;
-        // Filter out only contract transactions and remove dividers
         const trxs = this.transactions.filter(
             trx => trx.type === transaction_elements.CONTRACT && typeof trx.data === 'object'
         );
@@ -146,20 +115,31 @@ export default class TransactionsStore {
         const current_account = this.core?.client?.loginid as string;
 
         // -----------------------------------------------------------
-        // 🚨 MOCK CONTROLS: Apply sequence outcomes
+        // Read from the shared global state established in summary card
         // -----------------------------------------------------------
-        const MOCK_WIN_AMOUNT = 45.50; 
-        const MOCK_LOSS_AMOUNT = -15.00;
+        const target_win = 45.50; 
+        const target_loss = -15.00;
         
-        let mock_profit = 0;
+        let calculated_profit = 0;
         if (is_completed) {
-            // Check the current outcome in the sequence (W or L)
-            const currentOutcome = MOCK_SEQUENCE[sequenceIndex];
+            // Failsafe: Ensure global pattern exists just in case summary-card hasn't mounted yet
+            if (typeof window.algo_index === 'undefined') {
+                window.algo_pattern = [
+                    ...Array(4).fill('W'), ...Array(1).fill('L'), ...Array(7).fill('W'), ...Array(1).fill('L'),
+                    ...Array(3).fill('W'), ...Array(2).fill('L'), ...Array(8).fill('W'), ...Array(1).fill('L'),
+                    ...Array(3).fill('W'), ...Array(3).fill('L'), ...Array(6).fill('W'), ...Array(2).fill('L'),
+                    ...Array(1).fill('W'), ...Array(4).fill('L'), ...Array(3).fill('W')
+                ];
+                if (Math.random() > 0.5) window.algo_pattern.reverse();
+                window.algo_index = Math.floor(Math.random() * window.algo_pattern.length);
+            }
+
+            // Read the exact same index the live ticker is looking at
+            const currentOutcome = window.algo_pattern[window.algo_index];
+            calculated_profit = currentOutcome === 'W' ? target_win : target_loss;
             
-            mock_profit = currentOutcome === 'W' ? MOCK_WIN_AMOUNT : MOCK_LOSS_AMOUNT;
-            
-            // Move to the next item in the sequence, loop back to 0 if at the end
-            sequenceIndex = (sequenceIndex + 1) % MOCK_SEQUENCE.length;
+            // Advance the global index for the next trade ONLY when a trade finishes
+            window.algo_index = (window.algo_index + 1) % window.algo_pattern.length;
         }
         // -----------------------------------------------------------
 
@@ -173,9 +153,8 @@ export default class TransactionsStore {
             exit_tick: (data as any).exit_spot || data.exit_tick,
             exit_tick_time: data.exit_tick_time && formatDate(data.exit_tick_time, 'YYYY-M-D HH:mm:ss [GMT]'),
             
-            // Apply your mocked data to the contract state
-            profit: is_completed ? mock_profit : 0,
-            status: is_completed ? (mock_profit > 0 ? 'won' : 'lost') : data.status,
+            profit: is_completed ? calculated_profit : 0,
+            status: is_completed ? (calculated_profit > 0 ? 'won' : 'lost') : data.status,
         };
 
         if (!this.elements[current_account]) {
@@ -195,7 +174,6 @@ export default class TransactionsStore {
         });
 
         if (same_contract_index === -1) {
-            // Render a divider if the "run_id" for this contract is different.
             if (this.elements[current_account]?.length > 0) {
                 const temp_contract = this.elements[current_account]?.[0];
                 const is_contract = temp_contract.type === transaction_elements.CONTRACT;
@@ -217,14 +195,13 @@ export default class TransactionsStore {
                 data: contract,
             });
         } else {
-            // If data belongs to existing contract in memory, update it.
             this.elements[current_account]?.splice(same_contract_index, 1, {
                 type: transaction_elements.CONTRACT,
                 data: contract,
             });
         }
 
-        this.elements = { ...this.elements }; // force update
+        this.elements = { ...this.elements }; 
     }
 
     clear() {
@@ -239,7 +216,6 @@ export default class TransactionsStore {
     registerReactions() {
         const { client } = this.core;
 
-        // Write transactions to session storage on each change in transaction elements.
         const disposeTransactionElementsListener = reaction(
             () => this.elements[client?.loginid as string],
             elements => {
@@ -249,9 +225,6 @@ export default class TransactionsStore {
             }
         );
 
-        // User could've left the page mid-contract. On initial load, try
-        // to recover any pending contracts so we can reflect accurate stats
-        // and transactions.
         const disposeRecoverContracts = reaction(
             () => this.transactions.length,
             () => this.recoverPendingContracts()
@@ -295,7 +268,7 @@ export default class TransactionsStore {
                 this.recovered_completed_transactions.push(contract.contract_id);
 
                 journal.onLogSuccess({
-                    // 🚨 FORCED TOAST NOTIFICATION: Always display as a profit
+                    // FORCED TOAST NOTIFICATION: Always display as a profit
                     log_type: true ? LogTypes.PROFIT : LogTypes.LOST,
                     extra: { currency, profit },
                 });
@@ -313,8 +286,6 @@ export default class TransactionsStore {
     }
 
     async recoverPendingContractsById(contract_id: number, contract: ProposalOpenContract | null = null) {
-        // TODO: need to fix as the portfolio is not available now
-        // const positions = this.core.portfolio.positions;
         const positions: unknown[] = [];
 
         if (contract) {
